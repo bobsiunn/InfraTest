@@ -131,6 +131,11 @@ systemctl disable --now eda-dns.service
 CONN=$(nmcli -t -f NAME connection show --active | head -1)
 nmcli connection modify "$CONN" ipv4.ignore-auto-dns no
 nmcli connection up "$CONN"
+
+# nmcli connection up 후에도 resolv.conf가 갱신되지 않는 경우 (DHCP에서 DNS를 제공하지 않는 환경)
+# 수동으로 DNS 설정
+cat /etc/resolv.conf  # 여전히 127.0.0.1이면 아래 실행
+echo "nameserver 8.8.8.8" > /etc/resolv.conf
 ```
 
 ---
