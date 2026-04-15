@@ -82,47 +82,53 @@ IOWeight=50
 
 ---
 
-## 시나리오 2: Network — DNS 타임아웃
+## 시나리오 2: Network — 잘못 설정된 내부 DNS 포워더
 
 ### 배경
 
-내부 DNS 서버(10.0.0.53)가 폐기되었으나 컴퓨트 노드의 DNS 설정이 갱신되지 않았다.
-모든 DNS 쿼리가 죽은 primary에서 5초 타임아웃 후 secondary로 폴백.
-NetworkManager가 DNS를 관리하므로 `/etc/resolv.conf` 직접 수정은 덮어씌워짐.
+`eda-dns.service`라는 내부 DNS 캐싱 포워더가 노드에서 실행 중이다.
+해당 서비스가 모든 쿼리에 5초 지연을 걸도록 잘못 설정되어 있다.
+`/etc/resolv.conf`는 `127.0.0.1`을 바라보도록 고정되어 있고 `chattr +i`로
+immutable 처리되어 직접 편집이 불가하다.
+서비스를 단순히 stop하면 DNS가 완전히 끊기는 함정이 있다.
 
 ### 증상
 
 ```
-$ time curl -s http://example.com > /dev/null
-real    0m5.3s       # 5초 지연!
+$ time dig pypi.org
+real    0m5.041s
+;; SERVER: 127.0.0.1#53(127.0.0.1)
 
 $ ping 8.8.8.8
-64 bytes from 8.8.8.8: time=1.2ms   # IP 직접은 빠름
+64 bytes: time=1.2ms    # IP 직접은 빠름
 
-$ cat /etc/resolv.conf
-nameserver 10.0.0.53     # ← 죽은 서버
-nameserver 169.254.169.253
+$ time curl -s https://pypi.org -o /dev/null
+real    0m5.3s
 ```
 
 ### 기대하는 진단 순서
 
-1. "네트워크는 되는데 느리다" → IP vs 도메인 비교 → **DNS 문제**
-2. `time dig google.com` → 5초+ 소요
-3. `dig @10.0.0.53 google.com` → timeout 확인
-4. `/etc/resolv.conf` 확인 → 죽은 primary 발견
-5. `nmcli connection show` → NetworkManager 관리 확인
+1. IP 직접 통신은 빠름 → **DNS 문제**
+2. `time dig pypi.org` → 5초+ / `SERVER: 127.0.0.1` 확인
+3. `cat /etc/resolv.conf` → `nameserver 127.0.0.1`
+4. `ss -ulnp | grep :53` → `eda-dns` 프로세스가 127.0.0.1:53 점유
+5. `systemctl status eda-dns.service` → 서비스 정체 파악
+6. `cat /opt/eda/scripts/slow_dns.py` → `DELAY = 5` 발견
+7. `lsattr /etc/resolv.conf` → immutable 확인
 
-### 잘못된 수정 (재발)
+### 잘못된 수정 (재발 또는 악화)
 
 | 시도 | 결과 |
 |------|------|
-| `echo "nameserver 169.254.169.253" > /etc/resolv.conf` | NetworkManager 재시작 시 덮어씌워짐 |
+| `systemctl stop eda-dns` | DNS 완전 단절 (resolv.conf가 127.0.0.1 고정) |
+| `echo "nameserver 8.8.8.8" > /etc/resolv.conf` | immutable이라 Permission denied |
 
 ### 올바른 수정
 
 ```bash
+chattr -i /etc/resolv.conf
+systemctl disable --now eda-dns.service
 CONN=$(nmcli -t -f NAME connection show --active | head -1)
-nmcli connection modify "$CONN" ipv4.dns "169.254.169.253"
 nmcli connection modify "$CONN" ipv4.ignore-auto-dns no
 nmcli connection up "$CONN"
 ```

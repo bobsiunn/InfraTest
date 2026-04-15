@@ -58,37 +58,40 @@ fi
 
 # ── Network ──
 echo ""
-echo -e "${BOLD}[Network] DNS 타임아웃${NC}"
+echo -e "${BOLD}[Network] 잘못 설정된 DNS 포워더${NC}"
 
-# 4. DNS 응답 속도
-DNS_TIME=$( { time dig +short google.com > /dev/null 2>&1; } 2>&1 | grep real | awk '{print $2}')
-# 초 단위로 변환 (0m1.234s → 1.234)
-DNS_SECS=$(echo "$DNS_TIME" | sed 's/[^0-9.]//g; s/^0*//')
-if [[ -n "$DNS_SECS" ]] && (( $(echo "$DNS_SECS < 2" | bc -l 2>/dev/null || echo 0) )); then
-  pass "DNS 응답 ${DNS_SECS}초 (2초 이내)"
+# 4. DNS 응답 속도 (캐시 우회를 위해 처음 보는 도메인 사용)
+RANDOM_LABEL="test-$(date +%s%N | md5sum | head -c8)"
+DNS_START=$(date +%s%3N)
+dig +short +timeout=10 "${RANDOM_LABEL}.pypi.org" > /dev/null 2>&1 || true
+DNS_END=$(date +%s%3N)
+DNS_MS=$(( DNS_END - DNS_START ))
+
+if [[ "$DNS_MS" -lt 2000 ]]; then
+  pass "DNS 응답 ${DNS_MS}ms (2초 이내)"
 else
-  fail "DNS 응답 ${DNS_TIME} (2초 초과 — 타임아웃 잔존)"
+  fail "DNS 응답 ${DNS_MS}ms (2초 초과 — 지연 잔존)"
 fi
 
-# 5. resolv.conf primary DNS가 응답 가능
-PRIMARY_DNS=$(grep nameserver /etc/resolv.conf | head -1 | awk '{print $2}')
-if dig +short +timeout=2 google.com "@${PRIMARY_DNS}" > /dev/null 2>&1; then
-  pass "Primary DNS(${PRIMARY_DNS}) 응답 정상"
+# 5. eda-dns.service 비활성화됨
+if systemctl is-active eda-dns.service &>/dev/null; then
+  fail "eda-dns.service 아직 실행 중 (5초 지연 포워더 잔존)"
+elif systemctl is-enabled eda-dns.service &>/dev/null; then
+  fail "eda-dns.service disabled되지 않음 (재부팅 시 재발)"
 else
-  fail "Primary DNS(${PRIMARY_DNS}) 응답 없음"
+  pass "eda-dns.service 중단 및 disabled 확인"
 fi
 
-# 6. NetworkManager를 통해 수정됨 (10.0.0.53이 nmcli 설정에 없음)
-CONN=$(nmcli -t -f NAME connection show --active 2>/dev/null | head -1)
-if [[ -n "$CONN" ]]; then
-  NM_DNS=$(nmcli -g ipv4.dns connection show "$CONN" 2>/dev/null)
-  if echo "$NM_DNS" | grep -q "10.0.0.53"; then
-    fail "NetworkManager에 죽은 DNS(10.0.0.53) 잔존 → resolv.conf 직접 수정한 것으로 추정"
+# 6. resolv.conf immutable 해제 + 정상 DNS 설정
+if lsattr /etc/resolv.conf 2>/dev/null | grep -q '\-i-'; then
+  fail "resolv.conf 아직 immutable (chattr +i 미해제)"
+else
+  PRIMARY_DNS=$(grep nameserver /etc/resolv.conf | head -1 | awk '{print $2}')
+  if dig +short +timeout=2 google.com "@${PRIMARY_DNS}" > /dev/null 2>&1; then
+    pass "resolv.conf 정상 DNS(${PRIMARY_DNS})로 복원됨"
   else
-    pass "NetworkManager DNS 설정에서 10.0.0.53 제거됨"
+    fail "resolv.conf의 DNS(${PRIMARY_DNS}) 응답 없음"
   fi
-else
-  fail "NetworkManager 활성 연결 확인 불가"
 fi
 
 # ── 결과 ──
