@@ -64,20 +64,20 @@ dm-0        100.00  450.32
 
 ### 올바른 수정
 
-**즉각:** dm-delay 제거 후 정상 마운트
+**즉각:** dm-delay 제거
 ```bash
-systemctl stop compute-worker@{1,2,3,4}
-umount /opt/compute/data
+systemctl disable --now compute-worker@{1,2,3,4}.service
+umount /opt/eda/scratch
 dmsetup remove slow-data
-mount -o loop /opt/slow-data.img /opt/compute/data
-systemctl start compute-worker@{1,2,3,4}
+LOOP=$(losetup -j /opt/eda/scratch-data.img | cut -d: -f1)
+losetup -d "$LOOP"
 ```
 (실무에서는 볼륨 타입 업그레이드: gp2 → gp3/io2, provisioned IOPS)
 
 **재발 방지:** systemd unit에 I/O 제어 추가
 ```ini
 IOWeight=50
-# 또는 ExecStart=ionice -c2 -n7 /opt/compute/scripts/io_workload.sh
+# 또는 ExecStart=ionice -c2 -n7 /opt/eda/scripts/io_workload.sh
 ```
 
 ---
