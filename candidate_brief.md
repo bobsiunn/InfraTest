@@ -74,6 +74,7 @@
 - Host: (면접관 제공)
 - User: `root`
 - SSH Key: (면접관 제공)
+- `chown 400 SSHKey.pem` 으로 ssh key 권한을 맞춰주세요.
 
 ## 규칙
 
