@@ -22,9 +22,14 @@ echo ""
 
 # ── 사전 조건 ──
 if command -v apt-get &>/dev/null; then
-  apt-get install -y -qq dnsutils > /dev/null 2>&1 || true
+  apt-get install -y -qq dnsutils python3 > /dev/null 2>&1 || true
 elif command -v dnf &>/dev/null; then
-  dnf install -y -q bind-utils > /dev/null 2>&1 || true
+  dnf install -y -q bind-utils python3 > /dev/null 2>&1 || true
+fi
+
+if ! command -v python3 &>/dev/null; then
+  echo "[ERROR] python3 설치 실패 — 수동 설치 필요"
+  exit 1
 fi
 
 mkdir -p /opt/eda/scripts
